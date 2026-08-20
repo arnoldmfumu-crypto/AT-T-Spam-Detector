@@ -18,48 +18,50 @@ AT&T souhaite automatiser la détection des SMS indésirables (spam) afin de pro
 
 ## 🧠 Approche
 
-Deux modèles de **deep learning HuggingFace**, tous deux basés sur le *transfer learning* mais de tailles différentes, sont construits et comparés — le même code de fine-tuning (`Trainer` API) est réutilisé pour les deux, seul le checkpoint change :
+```
+Données brutes (CSV)
+        │
+        ▼
+Nettoyage & split stratifié (80/20)
+        │
+        ▼
+Tokenisation (AutoTokenizer, sous-mots WordPiece)
+        │
+        ├──► Fine-tuning DistilBERT  ──┐
+        │                              ├──► Comparaison & conclusion
+        └──► Fine-tuning BERT-base  ──┘
+```
 
-| Modèle | Description | Paramètres | Cours mobilisés |
-|---|---|---|---|
-| **Modèle 1** | Fine-tuning de `distilbert-base-uncased` (léger, rapide) | ~66M | `Understand_Transfer_Learning`, `Tokenization`, `Transformers_what_can_they_do`, `Behind_the_pipeline (PyTorch)`, `Fine_tuning_transfromers` |
-| **Modèle 2** | Fine-tuning de `bert-base-uncased` (plus grand, même checkpoint que le cours) | ~110M | `Fine_tuning_transfromers` |
+Les deux modèles reposent sur le même principe de **transfer learning** : on réutilise un modèle pré-entraîné sur un corpus massif, et on fine-tune l'ensemble du réseau (poids + nouvelle tête de classification à 2 classes) sur la tâche spam/ham, via l'API `Trainer` de HuggingFace. Seul le checkpoint pré-entraîné change entre les deux runs, pour une comparaison strictement équitable.
 
-Le F1-score sur la classe `spam` est utilisé comme métrique principale plutôt que la seule accuracy, pour tenir compte du déséquilibre des classes (~86% ham / 14% spam).
+---
 
 ## 📊 Résultats
 
-| Modèle | F1-score (spam) | Precision (spam) | Recall (spam) | Accuracy |
-|---|---|---|---|---|
-| Modèle 1 — DistilBERT fine-tuné | **0.9728** | 0.99 | 0.96 | 0.99 |
-| Modèle 2 — BERT-base fine-tuné | **0.9693** | 0.99 | 0.95 | 0.99 |
+Deux modèles [HuggingFace Transformers](https://huggingface.co/) ont été fine-tunés et comparés sur un jeu de test stratifié (1 115 SMS, dont 149 spam) :
 
-*(Jeu de test stratifié, 1115 SMS dont 149 spam)*
+| Modèle | Paramètres | F1-score (spam) | Precision | Recall | Accuracy |
+|---|---|---|---|---|---|
+| [`distilbert-base-uncased`](https://huggingface.co/distilbert/distilbert-base-uncased) | ~66M | **0.973** | 0.99 | 0.96 | 0.99 |
+| [`bert-base-uncased`](https://huggingface.co/bert-base-uncased) | ~110M | **0.969** | 0.99 | 0.95 | 0.99 |
 
-Les deux modèles atteignent un excellent niveau de performance, très proche l'un de l'autre — DistilBERT fait même légèrement mieux que BERT-base ici (meilleur recall sur la classe spam). Sur cette tâche (classifier des SMS courts), la capacité supplémentaire de BERT-base (~1.7x plus de paramètres) ne se traduit pas par un gain de performance : le vocabulaire "spam" (mots-clés promotionnels, majuscules, numéros, liens) est déjà bien capté par le modèle léger.
+**À retenir** : le modèle léger (DistilBERT) égale, voire dépasse légèrement, le modèle plus lourd (BERT-base) sur cette tâche — les SMS étant courts, la capacité supplémentaire de BERT-base n'apporte pas de gain mesurable. **DistilBERT est donc le meilleur compromis** : performance équivalente pour ~40% de coût de calcul en moins (entraînement + inférence), un critère important pour un traitement en temps réel à grande échelle.
 
-**Recommandation** : pour ce cas d'usage, **DistilBERT est le meilleur choix** — performance égale ou supérieure, pour un coût d'entraînement et d'inférence ~40% inférieur. C'est un point important pour AT&T si le modèle doit tourner en temps réel sur un grand volume de SMS entrants.
+<details>
+<summary>Détail complet (classification report)</summary>
 
-## 🚀 Utilisation
-
-```bash
-# 1. Créer un environnement virtuel (recommandé)
-python -m venv venv
-source venv/bin/activate   # ou venv\Scripts\activate sous Windows
-
-# 2. Installer les dépendances
-pip install -r requirements.txt
-
-# 3. Lancer Jupyter et ouvrir le notebook
-jupyter notebook 01-AT_T_spam_detector.ipynb
 ```
+DistilBERT
+              precision    recall  f1-score   support
+         ham       0.99      1.00      1.00       966
+        spam       0.99      0.96      0.97       149
 
-Le notebook s'exécute de haut en bas :
-1. Chargement & exploration des données
-2. Tokenisation pour les transformers (nécessite un accès internet au Hub HuggingFace)
-3. Modèle 1 : DistilBERT fine-tuné (nécessite un accès internet)
-4. Modèle 2 : BERT-base fine-tuné (nécessite un accès internet)
-5. Comparaison des performances & conclusion — **résultats déjà obtenus, voir ci-dessus**
+BERT-base
+              precision    recall  f1-score   support
+         ham       0.99      1.00      1.00       966
+        spam       0.99      0.95      0.97       149
+```
+> 💡 Un GPU accélère significativement les sections 3 et 4 (fine-tuning), mais n'est pas indispensable.
 
 ## 📁 Structure du projet
 
@@ -72,16 +74,10 @@ Le notebook s'exécute de haut en bas :
 └── README.md
 ```
 
-## ⚠️ Note sur `requirements.txt`
+## 🧩 Pistes d'amélioration
 
-`scikit-learn` reste utile (split train/test, métriques), mais `TfidfVectorizer` n'est plus utilisé : les deux modèles sont désormais des transformers HuggingFace. Vous pouvez retirer cette dépendance si vous voulez alléger l'environnement, elle ne gêne pas si vous la gardez.
+- [ ] Ajuster le seuil de décision selon le compromis precision/recall souhaité
+- [ ] Étudier les faux négatifs pour identifier des patterns de spam non détectés
+- [ ] Valider la robustesse sur des messages plus longs ou multilingues
+- [ ] Mise en production (API FastAPI, conteneurisation Docker, monitoring)
 
-## 🧩 Pistes d'amélioration (hors périmètre de ce livrable)
-
-- Ajuster le seuil de décision selon le compromis precision/recall souhaité par AT&T.
-- Valider la robustesse sur des messages plus longs ou multilingues.
-- Mise en production (API, conteneurisation, monitoring) — non traitée ici à la demande du commanditaire.
-
-## ❓ Question ouverte pour vous
-
-L'évaluation des modèles (classification report, matrice de confusion, F1-score) s'appuie sur `scikit-learn`, une bibliothèque standard non couverte par les cours qui m'ont été transmis. Si vous disposez d'un cours dédié à l'évaluation de modèles que vous souhaitez que je suive à la place (méthodologie, métriques spécifiques, seuils...), merci de me le transmettre et j'adapterai le notebook en conséquence.
